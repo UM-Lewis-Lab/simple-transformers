@@ -26,17 +26,17 @@ logger = get_logger(__name__)
 
 
 class ArgumentParser(Tap):
+    run_name: str
     dataset_path: Path
-
-    # checkpoint: Optional[str] = None  # Path to checkpoint if resuming training
-    precision: int = (
-        16  # How many bits of precision to use (controls mixed-precision training)
-    )
+    checkpoint_dir: Path = Path("/checkpoints")
     seed: int = 1234  # Random seed
     n_epochs: int = 1  # How many epochs of training to perform
     batch_size: int = 32  # Batch size for training
     eval_frequency: float = (
         0.2  # How often to calculate test loss (as a proportion of epoch)
+    )
+    checkpoint_frequency: float = (
+        0.5  # How often to save a checkpoint (as a proportion of epoch)
     )
 
     n_layers: int = 12  # Number of layers
@@ -53,6 +53,10 @@ class ArgumentParser(Tap):
     correct_bias: bool = False  # Correct the Adam optimizer bias
     dropout: float = 0.1  # Dropout probability during training
     use_tf32: bool = True  # Whether or not to use TF32 (https://huggingface.co/docs/transformers/main/en/perf_train_gpu_one#tf32=)
+
+    def configure(self):
+        self.add_argument("run_name")
+        self.add_argument("dataset_path")
 
 
 def main(args: ArgumentParser):
@@ -73,6 +77,11 @@ def main(args: ArgumentParser):
     else:
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
+
+    # Create directory for storing checkpoints
+    checkpoint_dir = args.checkpoint_dir / args.run_name
+    if not checkpoint_dir.exists():
+        checkpoint_dir.mkdir(parents=True)
 
     # Create model and tokenizer
     tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -127,9 +136,15 @@ def main(args: ArgumentParser):
         pin_memory=True,
     )
 
-    # Setup optimizers
+    # Calculate schedules
     total_steps = args.n_epochs * len(train_loader)
+    step_digits = len(str(total_steps))
+    epoch_digits = len(str(args.n_epochs))
+
     eval_every = int(len(train_loader) * args.eval_frequency)
+    checkpoint_every = int(len(train_loader) * args.checkpoint_frequency)
+
+    # Setup optimizers
     optimizer = AdamW(
         model.parameters(),
         lr=args.lr,
@@ -169,6 +184,12 @@ def main(args: ArgumentParser):
             lr_scheduler.step()
             pbar.update(1)
             status["loss"] = outputs.loss.detach().float().item()
+
+            if (step > 0 and step % checkpoint_every == 0) or (step + 1 == total_steps):
+                # Save a checkpoint
+                str_epoch = str(epoch).zfill(epoch_digits)
+                str_step = str(step).zfill(step_digits)
+                accelerator.save_state(checkpoint_dir / f"{str_epoch}_{str_step}")
 
             if step > 0 and step % eval_every == 0:
                 # Calculate test loss
