@@ -1,7 +1,6 @@
 import logging
 import math
 from pathlib import Path
-from typing import Optional
 
 import datasets
 import torch
@@ -14,7 +13,6 @@ from tap import Tap
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import (
-    AdamW,
     GPT2Config,
     GPT2LMHeadModel,
     GPT2TokenizerFast,
@@ -46,11 +44,11 @@ class ArgumentParser(Tap):
 
     lr: float = 0.0001  # Initial learning rate
     warmup_steps: int = 50  # How many warmup steps to use for LR schedule
+    weight_decay: float = 0.01  # Weight decay to use
 
     b1: float = 0.9  # Beta1 for Adam optimizer
     b2: float = 0.999  # Beta2 for Adam optimizer
     eps: float = 1e-6  # Epsilon for Adam optimizer
-    correct_bias: bool = False  # Correct the Adam optimizer bias
     dropout: float = 0.1  # Dropout probability during training
     use_tf32: bool = True  # Whether or not to use TF32 (https://huggingface.co/docs/transformers/main/en/perf_train_gpu_one#tf32=)
 
@@ -63,20 +61,6 @@ def main(args: ArgumentParser):
     set_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = args.use_tf32
     accelerator = Accelerator()
-
-    # Setup logging.
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
-    logger.info(accelerator.state, main_process_only=False)
-    if accelerator.is_local_main_process:
-        datasets.utils.logging.set_verbosity_warning()
-        transformers.utils.logging.set_verbosity_info()
-    else:
-        datasets.utils.logging.set_verbosity_error()
-        transformers.utils.logging.set_verbosity_error()
 
     # Create directory for storing checkpoints
     checkpoint_dir = args.checkpoint_dir / args.run_name
@@ -145,18 +129,49 @@ def main(args: ArgumentParser):
     checkpoint_every = int(len(train_loader) * args.checkpoint_frequency)
 
     # Setup optimizers
-    optimizer = AdamW(
-        model.parameters(),
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": args.weight_decay,
+        },
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    optimizer = torch.optim.AdamW(
+        optimizer_grouped_parameters,
         lr=args.lr,
         eps=args.eps,
         betas=(args.b1, args.b2),
-        correct_bias=args.correct_bias,
     )
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_steps=args.warmup_steps,
         num_training_steps=total_steps,
     )
+
+    # Setup logging.
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
+    if accelerator.is_local_main_process:
+        datasets.utils.logging.set_verbosity_warning()
+        transformers.utils.logging.set_verbosity_info()
+    else:
+        datasets.utils.logging.set_verbosity_error()
+        transformers.utils.logging.set_verbosity_error()
 
     # Put data, model, and optimizer onto GPUs.
     model, optimizer, train_loader, test_loader, lr_scheduler = accelerator.prepare(
