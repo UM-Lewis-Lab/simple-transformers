@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-$0}"; )" &> /dev/null && pwd 2> /dev/null; )";
-NAME='simple_transformers'
+NAME='simple-transformers'
 CHECKPOINT_DIR="${HOME}/checkpoints/${NAME}"
 mkdir -p "$CHECKPOINT_DIR"
 docker build -t "$NAME" .
