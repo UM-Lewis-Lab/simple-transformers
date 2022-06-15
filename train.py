@@ -30,12 +30,12 @@ class ArgumentParser(Tap):
     checkpoint_dir: Path = Path("/checkpoints")
     seed: int = 1234  # Random seed
     n_epochs: int = 1  # How many epochs of training to perform
-    batch_size: int = 12  # Batch size for training
+    per_device_batch_size: int = 12  # Batch size per GPU/CPU used
     eval_frequency: float = (
-        0.2  # How often to calculate test loss (as a proportion of epoch)
+        1.0  # How often to calculate test loss (as a proportion of epoch)
     )
     checkpoint_frequency: float = (
-        0.5  # How often to save a checkpoint (as a proportion of epoch)
+        1.0  # How often to save a checkpoint (as a proportion of epoch)
     )
 
     n_layers: int = 12  # Number of layers
@@ -104,26 +104,27 @@ def main(args: ArgumentParser):
     dataset.set_transform(prepare_batch, columns=["input_ids"])
     train_loader = DataLoader(
         dataset["train"],
-        batch_size=args.batch_size,
+        batch_size=args.per_device_batch_size,
         collate_fn=default_data_collator,
         num_workers=12,
         pin_memory=True,
     )
     test_loader = DataLoader(
         dataset["test"],
-        batch_size=args.batch_size,
+        batch_size=args.per_device_batch_size,
         collate_fn=default_data_collator,
         num_workers=8,
         pin_memory=True,
     )
 
     # Calculate schedules
-    total_steps = args.n_epochs * len(train_loader)
-    step_digits = len(str(total_steps))
+    steps_per_epoch = len(train_loader) // accelerator.num_processes
+    total_steps = args.n_epochs * steps_per_epoch
+    step_digits = len(str(steps_per_epoch))
     epoch_digits = len(str(args.n_epochs))
 
-    eval_every = int(len(train_loader) * args.eval_frequency)
-    checkpoint_every = int(len(train_loader) * args.checkpoint_frequency)
+    eval_every = int(steps_per_epoch * args.eval_frequency)
+    checkpoint_every = int(steps_per_epoch * args.checkpoint_frequency)
 
     # Setup optimizers
     no_decay = ["bias", "LayerNorm.weight"]
@@ -185,6 +186,7 @@ def main(args: ArgumentParser):
         disable=not accelerator.is_local_main_process,
     )
     status = {}
+    global_step = 0
     for epoch in range(args.n_epochs):
         status["epoch"] = epoch
         model.train()
@@ -194,16 +196,17 @@ def main(args: ArgumentParser):
             accelerator.backward(outputs.loss)
             optimizer.step()
             lr_scheduler.step()
-            pbar.update(1)
             status["loss"] = outputs.loss.detach().float().item()
 
-            if (step > 0 and step % checkpoint_every == 0) or (step + 1 == total_steps):
+            if (global_step > 0 and global_step % checkpoint_every == 0) or (
+                global_step + 1 == total_steps
+            ):
                 # Save a checkpoint
                 str_epoch = str(epoch).zfill(epoch_digits)
                 str_step = str(step).zfill(step_digits)
                 accelerator.save_state(checkpoint_dir / f"{str_epoch}_{str_step}")
 
-            if step > 0 and step % eval_every == 0:
+            if global_step > 0 and global_step % eval_every == 0:
                 # Calculate test loss
                 model.eval()
                 losses = []
@@ -211,7 +214,9 @@ def main(args: ArgumentParser):
                     with torch.no_grad():
                         outputs = model(**batch)
                     loss = outputs.loss
-                    losses.append(accelerator.gather(loss.repeat(args.batch_size)))
+                    losses.append(
+                        accelerator.gather(loss.repeat(args.per_device_batch_size))
+                    )
                 losses = torch.cat(losses)
                 losses = losses[: len(test_loader)]
                 test_loss = float("inf")
@@ -227,6 +232,8 @@ def main(args: ArgumentParser):
                     )
                 )
             pbar.set_postfix(status)
+            pbar.update(1)
+            global_step += 1
 
 
 if __name__ == "__main__":
