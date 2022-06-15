@@ -15,10 +15,11 @@ from tqdm.auto import tqdm
 from transformers import (
     GPT2Config,
     GPT2LMHeadModel,
-    GPT2TokenizerFast,
     default_data_collator,
     get_cosine_schedule_with_warmup,
 )
+
+from common import get_tokenizer
 
 logger = get_logger(__name__)
 
@@ -29,7 +30,7 @@ class ArgumentParser(Tap):
     checkpoint_dir: Path = Path("/checkpoints")
     seed: int = 1234  # Random seed
     n_epochs: int = 1  # How many epochs of training to perform
-    batch_size: int = 32  # Batch size for training
+    batch_size: int = 12  # Batch size for training
     eval_frequency: float = (
         0.2  # How often to calculate test loss (as a proportion of epoch)
     )
@@ -40,7 +41,7 @@ class ArgumentParser(Tap):
     n_layers: int = 12  # Number of layers
     n_heads: int = 12  # Number of attention heads
     embedding_size: int = 768  # Size of embeddings and hidden states
-    context_size: int = 512
+    context_size: int = 1024
 
     lr: float = 0.0001  # Initial learning rate
     warmup_steps: int = 50  # How many warmup steps to use for LR schedule
@@ -68,14 +69,7 @@ def main(args: ArgumentParser):
         checkpoint_dir.mkdir(parents=True)
 
     # Create model and tokenizer
-    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-    tokenizer.model_max_length = args.context_size
-    if tokenizer.pad_token_id is None:
-        tokenizer.add_special_tokens(
-            special_tokens_dict=dict(
-                pad_token=tokenizer.eos_token,
-            )
-        )
+    tokenizer = get_tokenizer(args.context_size)
     model_config = GPT2Config(
         n_layer=args.n_layers,
         n_head=args.n_heads,
@@ -91,6 +85,9 @@ def main(args: ArgumentParser):
         output_attentions=False,
         output_hidden_states=False,
     )
+    if accelerator.is_main_process:
+        # Save the model config to disk so we can load it later.
+        model_config.save_pretrained(checkpoint_dir)
     model = GPT2LMHeadModel(model_config)
 
     # Load training data

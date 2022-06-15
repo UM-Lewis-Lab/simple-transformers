@@ -1,9 +1,10 @@
-from pathlib import Path
 from itertools import chain
+from pathlib import Path
 
-from tap import Tap
-from transformers import AutoTokenizer
 from datasets import load_dataset
+from tap import Tap
+
+from common import get_tokenizer
 
 
 class Args(Tap):
@@ -13,8 +14,12 @@ class Args(Tap):
     test_proportion: float = 0.1  # Proportion of the input data to use for testing
     tokenizer: str = "gpt2"  # The HuggingFace model name of the tokenizer to use.
     model_context_size: int = (
-        512  # The context size of the model that will use this data
+        1024  # The context size of the model that will use this data
     )
+
+    def configure(self):
+        self.add_argument("input_path")
+        self.add_argument("output_path")
 
 
 # Taken from: https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm_no_trainer.py
@@ -35,14 +40,7 @@ def group_texts(examples, block_size: int):
 
 def main(args: Args):
     # Load and configure the tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-    tokenizer.model_max_length = args.model_context_size
-    if tokenizer.pad_token_id is None:
-        tokenizer.add_special_tokens(
-            special_tokens_dict=dict(
-                pad_token=tokenizer.eos_token,
-            )
-        )
+    tokenizer = get_tokenizer(args.model_context_size)
 
     # Load the raw text file
     dataset = load_dataset("text", data_files=str(args.input_path))["train"]
