@@ -1,7 +1,9 @@
 #! /usr/bin/env bash
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-$0}"; )" &> /dev/null && pwd 2> /dev/null; )";
+source "${SCRIPT_DIR}/.env"
 NAME='simple-transformers'
-CHECKPOINT_DIR="${HOME}/checkpoints/${NAME}"
+mkdir -p "$HUGGINGFACE_CACHE_DIR"
+mkdir -p "$TORCH_EXTENSIONS_HOST_DIR"
 mkdir -p "$CHECKPOINT_DIR"
 docker build -t "$NAME" .
 docker run --rm -it \
