@@ -3,8 +3,7 @@ This repository contains simplified example code to train and sample from transf
 language models potentially across multiple GPUs using 
 [🤗Transformers](https://github.com/huggingface/transformers) 
 and [🤗Accelerate](https://github.com/huggingface/accelerate/).
-
-## Prerequisits
+## Prerequisites
 We recommend you run this code in Docker using the provided `Dockerfile`.
 In order to do this you must first [install Docker](https://docs.docker.com/get-docker/)
 on the machine you will use to run your experiments.
