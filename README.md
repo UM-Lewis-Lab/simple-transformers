@@ -26,7 +26,7 @@ Finally, run the following command:
 Follow the prompts and answer the questions about your hardware (if you are not sure,
 stick with the default answers).
 
-## Usage
+# Usage
 All of the scripts in this repository can be run via Docker using the `run.sh` script,
 which can be used as follows:
 
@@ -54,7 +54,7 @@ repository, or edit `run.sh` to mount the folder that contains them:
 where `<your-source>` is the path on machine with Docker installed, and `<your-target>` is the
 path you want to mount it to inside the container.
 
-### Preparing a dataset
+## 📚Preparing a dataset
 This example assumes you have a text file in which each line is a separate unit of text
 (e.g. a sentence or paragraph) that the model should be trained on.
 Before we can use the data to train a model, it must be pre-processed (tokenized, split
@@ -66,7 +66,7 @@ into managable chunks for the model, and split into train/test sets). To do this
 
 We will use the resuling `.arrow` file to train our model.
 
-### Training a model
+## 🏋️Training a model
 Once you have prepared the data, you can train a model using:
 ```bash
 ./run.sh all accelerate launch train.py <run_name> <path/to/data.arrow>
@@ -77,7 +77,7 @@ See `train.py` for a list of additional options and
 their functions.
 
 
-### Sampling from a trained model
+## 💬Sampling from a trained model
 After training a model, we can load on of the saved checkpoints and sample from it. First, identify
 which checkpoint you would like to sample from. To get the name of the latest checkpoint you can run
 ```bash
