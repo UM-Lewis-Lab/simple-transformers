@@ -21,7 +21,7 @@ class ArgumentParser(Tap):
     seed: int = 1234  # Random seed
 
     # Sampling options (see: https://huggingface.co/docs/transformers/v4.19.4/en/main_classes/text_generation#transformers.generation_utils.GenerationMixin.generate=)
-    do_sample: bool = False  # Defaults to false for greedy sampling.
+    do_sample: bool = True  # Change to false for greedy sampling.
     temperature: float = 1.0
     num_beams: int = 1  # Defaults to 1 for no beam search
     top_k: int = 50
