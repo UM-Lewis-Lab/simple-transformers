@@ -2,20 +2,22 @@ import csv
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 from tap import Tap
-from transformers import GPT2Config, GPT2LMHeadModel, set_seed
+from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
+                          GPT2Config, GPT2LMHeadModel, set_seed)
 
 from common import get_tokenizer
 
 
 class ArgumentParser(Tap):
-    checkpoint: Optional[
-        Path
-    ] = None  # Load model from a checkpoint (loads OpenAI GPT2 Small if not provided)
+    checkpoint: Optional[Path] = None  # Load model from a checkpoint
+    public_model: Optional[str] = "gpt2"  # Load public model from huggingface
     prompt: Optional[str] = None  # Provide a single prompt as a script argument
     prompt_file: Optional[Path] = None  # Read prompts from a CSV file
-    output: Optional[Path] = None  # Write output to a file
+    output: Optional[Path] = None  # Write completions to a file
+    with_attention: bool = False  # Write attention to a file
     silent: bool = False  # Do not print output
     n: int = 10  # How many unconditional samples to produce (only used if no prompts are provided)
     seed: int = 1234  # Random seed
@@ -29,7 +31,7 @@ class ArgumentParser(Tap):
     typical_p: Optional[float] = None
     repetition_penalty: Optional[float] = None
     no_repeat_ngram_size: Optional[int] = None
-    max_new_tokens: Optional[int] = None
+    max_new_tokens: int = 100
 
 
 def main(args: ArgumentParser):
@@ -40,10 +42,11 @@ def main(args: ArgumentParser):
         model.load_state_dict(
             torch.load(args.checkpoint / "pytorch_model.bin", map_location="cpu")
         )
+        tokenizer = get_tokenizer(model_config.n_ctx)
     else:
-        model_config = GPT2Config.from_pretrained("gpt2")
-        model = GPT2LMHeadModel.from_pretrained("gpt2")
-    tokenizer = get_tokenizer(model_config.n_ctx)
+        model_config = AutoConfig.from_pretrained(args.public_model)
+        model = AutoModelForCausalLM.from_pretrained(args.public_model)
+        tokenizer = AutoTokenizer.from_pretrained(args.public_model)
 
     # Prepare the model inputs (prompts):
     if args.prompt is not None:
@@ -60,10 +63,14 @@ def main(args: ArgumentParser):
     # Setup output file if needed
     out_f = None
     writer = None
+    attention_fname = None
     if args.output:
+        if not args.output.parent.exists():
+            args.output.parent.mkdir(parents=True)
         out_f = args.output.open("w")
         writer = csv.writer(out_f)
-        writer.writerow(["prompt", "output"])
+        writer.writerow(["id", "prompt", "output"])
+        attention_fname = args.output.name.split(".")[0]
 
     # Colors for printing to terminal
     prompt_color = "\033[0;35;08m"
@@ -74,14 +81,14 @@ def main(args: ArgumentParser):
     set_seed(args.seed)
     if not args.silent:
         print(f"{prompt_color}PROMPT\t{model_color}MODEL{reset_color}\n")
-    for t in inputs:
+    for i, t in enumerate(inputs):
         prompt = t[0]
         # Convert the input text into tokens
         input_tokens = tokenizer(tokenizer.eos_token + prompt, return_tensors="pt")[
             "input_ids"
         ]
         # Generate a sample from the model
-        response_tokens = model.generate(
+        response = model.generate(
             input_tokens,
             do_sample=args.do_sample,
             temperature=args.temperature,
@@ -94,9 +101,11 @@ def main(args: ArgumentParser):
             max_new_tokens=args.max_new_tokens,
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.eos_token_id,
+            output_attentions=args.with_attention,
+            return_dict_in_generate=True,
         )
         # Trim the prompt tokens from the response
-        response_tokens = response_tokens[:, input_tokens.size(1) :].tolist()
+        response_tokens = response.sequences[:, input_tokens.size(1) :].tolist()
         # Decode the tokens back into text
         output = tokenizer.batch_decode(response_tokens, skip_special_tokens=True)[0]
 
@@ -104,7 +113,19 @@ def main(args: ArgumentParser):
         if not args.silent:
             print(f"{prompt_color}{prompt}{model_color}{output}{reset_color}\n")
         if writer is not None:
-            writer.writerow([t[0], output])
+            writer.writerow([i, t[0], output])
+            if args.with_attention:
+                attn = {
+                    "id": i,
+                    "attention": response.attentions,
+                    "prompt_tokens": tokenizer.convert_ids_to_tokens(
+                        input_tokens[0].tolist()
+                    ),
+                    "response_tokens": tokenizer.convert_ids_to_tokens(
+                        response_tokens[0]
+                    ),
+                }
+                torch.save(attn, args.output.parent / f"{attention_fname}_attn{i}.pt")  # type: ignore
     if out_f is not None:
         out_f.close()
 

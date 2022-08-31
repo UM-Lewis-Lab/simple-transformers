@@ -12,6 +12,7 @@ docker run --rm -it \
   --env-file .env \
   -h="$(hostname -s)" \
   -e TERM=xterm-256color \
+  -p "$JUPYTER_PORT:$JUPYTER_PORT" \
   --mount "src=$SCRIPT_DIR,target=/src,type=bind" \
   --mount "src=$CHECKPOINT_DIR,target=/checkpoints,type=bind" \
   --mount "src=$HUGGINGFACE_CACHE_DIR,target=/root/.cache/huggingface/,type=bind" \
